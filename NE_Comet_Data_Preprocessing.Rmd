@@ -1,0 +1,147 @@
+---
+title: "Near_Earth_Comet_Preprocessing"
+author: "Troy Allen"
+date: "2024-06-05"
+output: html_document
+---
+
+Let's load in the data and some necessary packages first.
+```{r setup, include=FALSE}
+library(tidyverse)
+library(caret)
+library(glmnet)
+
+comet_data= read.csv("C:/Users/Troy/Downloads/Near-Earth_Comets_-_Orbital_Elements_20240605.csv")
+comet_data
+```
+
+Checking for missing values:
+```{r}
+# Find nan values
+missing_values <- comet_data %>% 
+  summarise(across(everything(), ~ sum(is.na(.)))) %>% 
+  gather(key = "Column", value = "MissingValues")
+
+# Print nan values
+missing_values
+```
+
+We can see the missing values are as follows:
+
+A1 = 122 missing values
+A2 = 119 missing values
+A3 = 150 missing values
+DT = 156 missing values
+
+Obviously can't drop all of these rows due to the sheer number of missing values we have.
+
+```{r}
+# Print out the 4 problematic columns
+print(comet_data %>% select(A1..AU.d.2., A2..AU.d.2., A3..AU.d.2., DT..d.))
+```
+Dropping the columns A3 and DT seems like the best option for now. Currently dropping A1/A2 as well since I wanted to see what Corey has to say about the importance of these columns in our models.
+
+```{r}
+# Drop the 'A3' and 'DT' columns
+comet_data_no_A3DT <- comet_data %>%
+  select(-c(A1..AU.d.2., A2..AU.d.2.,A3..AU.d.2., DT..d.))
+
+# Print the dataset without A3/DT
+comet_data_no_A3DT
+```
+
+Let's check for outliers now.
+
+```{r}
+# Filter out non-numeric columns
+numeric_cols <- select_if(comet_data_no_A3DT, is.numeric)
+
+# Calculate Z-scores for each numeric column
+z_scores <- numeric_cols %>% 
+  mutate(across(everything(), scale))
+
+# Define threshold
+threshold <- 2
+
+# Identify outliers based on Z-score
+outliers <- comet_data_no_A3DT %>% 
+  filter(rowSums(abs(z_scores) > threshold, na.rm = TRUE) > 0)
+
+print(outliers)
+```
+
+```{r}
+# Filter the outlier columns based on threshold
+outlier_columns <- apply(abs(z_scores) > threshold, 1, function(x) colnames(comet_data_no_A3DT)[x])
+
+# Print which columns the outlier lies in and the entire row associated with outlier
+for(i in 1:nrow(outliers)) {
+  if(length(outlier_columns[[i]]) > 0) {
+    cat("Row:", i, "\n")
+    cat("Outlier columns:", paste(outlier_columns[i], collapse = ", "), "\n")
+    print(outliers[i, ])
+  }
+}
+
+```
+Wanted to compare each to the mean and stddev of each column.
+
+```{r}
+# Filter out numeric columns
+numeric_data <- comet_data_no_A3DT[, sapply(comet_data_no_A3DT, is.numeric)]
+
+# Calculate mean of each column
+column_means <- colMeans(numeric_data, na.rm = TRUE)
+
+# Calculate standard deviation of each column
+column_stddev <- sapply(numeric_data, sd, na.rm = TRUE)
+
+# Print mean and standard deviation of each column
+for (i in seq_along(column_means)) {
+  cat("Column:", names(column_means)[i], "\n")
+  cat("Mean:", column_means[i], "\n")
+  cat("Standard Deviation:", column_stddev[i], "\n\n")
+}
+```
+
+Creating a standardized version of the data in case it is needed.
+
+```{r}
+# Get numeric columns from cleaned data
+numeric_comet_data <- comet_data_no_A3DT[, sapply(comet_data_no_A3DT, is.numeric)]
+
+# Get mean + sd
+means <- colMeans(numeric_comet_data)
+sds <- apply(numeric_comet_data, 2, sd)
+
+# Standardize each column and print
+standardized_comet_data <- scale(numeric_comet_data, center = means, scale = sds)
+standardized_comet_data
+
+```
+
+Some simple plots based on Eccentricity, perihelion distance, and orbital elements:
+
+```{r}
+ggplot(comet_data_no_A3DT, aes(x = e, y = i..deg.)) +
+  geom_point() +
+  labs(x = "Eccentricity", y = "Inclination (deg)", title = "Scatter Plot of Eccentricity vs. Inclination")
+```
+```{r}
+ggplot(comet_data_no_A3DT, aes(x = e, y = q..AU.)) +
+  geom_point() +
+  labs(x = "Eccentricity", y = "Perihelion Distance (q AU)", title = "Scatter Plot of Eccentricity vs. Perihelion Distance") 
+```
+
+```{r}
+# Filter orbital elements 
+orbital_elements <- comet_data[, c("q..AU.", "Epoch..TDB.", "TP..TDB.", "e", "i..deg.", "w..deg.", "Node..deg.")]
+
+# Create a scatterplot matrix showing relationship between q and other orbital elements
+pairs(orbital_elements, pch = 21, bg = "skyblue")
+```
+
+```{r}
+write.csv(comet_data_no_A3DT, "comet_data_cleaned.csv", row.names = FALSE)
+```
+
